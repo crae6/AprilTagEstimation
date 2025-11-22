@@ -60,7 +60,7 @@ def main():
     cv2.imwrite("enhanced.png", enhanced_r)
     cv2.imwrite("comparison_triplet.png", combined)
 
-    print("✅ Saved comparison_triplet.png")
+    print("Saved comparison_triplet.png")
 
     cv2.waitKey(0)
     cv2.destroyAllWindows()
