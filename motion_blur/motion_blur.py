@@ -95,7 +95,7 @@ def wiener_filter(blurred, psf, K=0.01):
     f_hat = np.clip(f_hat, 0.0, 1.0)
     return f_hat
 
-img = imread("apriltag.jpg", pilmode="L").astype(np.float32) / 255.0
+img = imread("motion_blur/apriltag.jpg", pilmode="L").astype(np.float32) / 255.0
 
 psf = motion_psf(img.shape, length=25, angle=20)
 
