@@ -19,3 +19,5 @@ For Gamma + CLAHE + Retinex method download pupil_clahe.py. Simply run this code
 
 For Adaptive Shadow Boost method download pupil_adaptive.py. Simply run this code on the pi_cam dataset and should see the results.
 
+In order to run model on low light data only download and run pupil_adaptive_lowlightonly.py.
+
