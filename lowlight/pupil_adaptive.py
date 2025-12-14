@@ -1,38 +1,45 @@
 import cv2
 import numpy as np
 import os
+import time
 from pupil_apriltags import Detector as PupilDetector
+
+PI_CAM_DIR = "dataset/pi_cam"
+OUT_DIR = "results_pi_cam_full"
+
+TAG_FAMILY = "tag36h11"
+TAG_SIZE = 0.20
+CAMERA_PARAMS = (2.48502856e+03, 2.48095083e+03, 1.67655746e+03, 1.33820137e+03)
 
 DARK_FACTOR = 0.3
 SHADOW_THRESH = 80
 BRIGHTEN_MULT = 2.5
 
-def make_lowlight(img, factor=0.3):
+
+def make_lowlight(img, factor=DARK_FACTOR):
     return np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
+
 
 def adaptive_shadow_boost(img):
     img_f = img.astype(np.float32)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    shadow_mask = gray < SHADOW_THRESH
-    shadow_mask_3 = np.repeat(shadow_mask[:, :, None], 3, axis=2)
+    mask = gray < SHADOW_THRESH
+    mask_3 = np.repeat(mask[:, :, None], 3, axis=2)
 
     boosted = img_f.copy()
-    boosted[shadow_mask_3] *= BRIGHTEN_MULT
+    boosted[mask_3] *= BRIGHTEN_MULT
     boosted = np.clip(boosted, 0, 255).astype(np.uint8)
 
-    filtered = cv2.bilateralFilter(boosted, 9, 75, 75)
-    p2, p98 = np.percentile(filtered, (2, 98))
-    stretched = np.clip(
-        (filtered - p2) * (255.0 / (p98 - p2)),
-        0, 255
-    ).astype(np.uint8)
+    filt = cv2.bilateralFilter(boosted, 9, 75, 75)
+    p2, p98 = np.percentile(filt, (2, 98))
+    stretched = np.clip((filt - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
 
     return stretched
 
 class DetectorOptions:
     def __init__(self,
-                 families='tag36h11',
+                 families=TAG_FAMILY,
                  nthreads=4,
                  quad_decimate=1.0,
                  quad_blur=0.0,
@@ -62,7 +69,12 @@ class Detector:
         )
 
     def detect(self, gray, return_image=False):
-        results = self.det.detect(gray)
+        results = self.det.detect(
+            gray,
+            estimate_tag_pose=True,
+            camera_params=CAMERA_PARAMS,
+            tag_size=TAG_SIZE
+        )
 
         if not return_image:
             return results
@@ -71,86 +83,105 @@ class Detector:
         for r in results:
             pts = r.corners.astype(int)
             cv2.polylines(dimg, [pts], True, 255, 2)
-
         return results, dimg
 
 def detect_tags(image, detector):
+
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    detections, dimg = detector.detect(gray, return_image=True)
+
+    start_t = time.time()
+    results, dimg = detector.detect(gray, return_image=True)
+    runtime = time.time() - start_t
 
     overlay = image // 2 + dimg[:, :, None] // 2
 
-    for r in detections:
-        pts = r.corners.astype(int)
-        cv2.polylines(overlay, [pts], True, (0, 255, 0), 2)
+    pose_errors = []
+    margins = []
 
-        cx, cy = r.center
-        cv2.circle(overlay, (int(cx), int(cy)), 4, (0, 0, 255), -1)
+    for r in results:
+
+        pts = r.corners.astype(int)
+        cx, cy = map(int, r.center)
+
+        cv2.polylines(overlay, [pts], True, (0, 255, 0), 2)
+        cv2.circle(overlay, (cx, cy), 4, (0, 0, 255), -1)
 
         cv2.putText(
             overlay,
             f"ID:{r.tag_id} M:{r.decision_margin:.1f}",
             (pts[0][0], pts[0][1] - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
+            0.55,
             (255, 0, 0),
             2
         )
 
-    return detections, overlay
+        margins.append(r.decision_margin)
+        if r.pose_t is not None:
+            pose_errors.append(float(np.linalg.norm(r.pose_t)))
 
-PI_CAM_DIR = "dataset/pi_cam"
-OUT_DIR = "results_pi_cam"
+    return results, overlay, runtime, pose_errors, margins
+
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    options = DetectorOptions()
-    det = Detector(options)
-    image_files = sorted(
-        f for f in os.listdir(PI_CAM_DIR)
-        if f.lower().endswith(".jpg")
-    )
+    detector = Detector(DetectorOptions())
 
-    print(f"\nFound {len(image_files)} images in {PI_CAM_DIR}\n")
-    total_baseline = 0
-    total_lowlight = 0
-    total_boosted = 0
+    files = sorted([f for f in os.listdir(PI_CAM_DIR) if f.endswith(".jpg")])
+    print(f"Found {len(files)} images.")
 
-    for filename in image_files:
-        path = os.path.join(PI_CAM_DIR, filename)
-        img = cv2.imread(path)
+    # totals
+    total_base = total_boost = 0
+    base_time = boost_time = 0.0
+    base_pose = boost_pose = 0.0
+    base_margins = boost_margins = 0.0
+    base_count = boost_count = 0
 
+    for fname in files:
+        print(f"\n--- Processing {fname} ---")
+
+        img = cv2.imread(os.path.join(PI_CAM_DIR, fname))
         if img is None:
-            print(f"Could not load {filename}")
             continue
+        detB, outB, timeB, poseB, margB = detect_tags(img, detector)
+        cv2.imwrite(os.path.join(OUT_DIR, f"{fname}_baseline.png"), outB)
 
-        print(f"\n----- Processing {filename} -----")
-        base_det, base_overlay = detect_tags(img, det)
-        cv2.imwrite(os.path.join(OUT_DIR, f"{filename}_baseline.png"), base_overlay)
-        print(f"Baseline detections: {len(base_det)}")
-        total_baseline += len(base_det)       
+        total_base += len(detB)
+        base_time += timeB
+        base_pose += sum(poseB)
+        base_margins += sum(margB)
+        base_count += len(poseB)
+        low = make_lowlight(img)
+        boosted = adaptive_shadow_boost(low)
 
-        lowlight = make_lowlight(img, DARK_FACTOR)
-        low_det, low_overlay = detect_tags(lowlight, det)
-        cv2.imwrite(os.path.join(OUT_DIR, f"{filename}_lowlight.png"), low_overlay)
-        print(f"Low-light detections: {len(low_det)}")
-        total_lowlight += len(low_det)      
-        boosted = adaptive_shadow_boost(lowlight)
-        boost_det, boost_overlay = detect_tags(boosted, det)
-        cv2.imwrite(os.path.join(OUT_DIR, f"{filename}_boosted.png"), boost_overlay)
-        print(f"Boosted detections: {len(boost_det)}")
-        total_boosted += len(boost_det)       
+        detE, outE, timeE, poseE, margE = detect_tags(boosted, detector)
+        cv2.imwrite(os.path.join(OUT_DIR, f"{fname}_boosted.png"), outE)
 
+        total_boost += len(detE)
+        boost_time += timeE
+        boost_pose += sum(poseE)
+        boost_margins += sum(margE)
+        boost_count += len(poseE)
 
-    print("\n-----------------------------------------")
-    print("           FINAL RESULTS")
-    print("-----------------------------------------")
-    print(f"Total Baseline detections:     {total_baseline}")
-    print(f"Total Method2 detections:      {total_boosted}")
-    print("-----------------------------------------")
-    print(f"All processed outputs saved in: {OUT_DIR}")
-    print("-----------------------------------------\n")
+    print("\n==================== FINAL RESULTS ====================")
+
+    print(f"Baseline total detections: {total_base}")
+    print(f"Boosted total detections:  {total_boost}")
+
+    print("\n--- SPEED ---")
+    print(f"Baseline avg runtime: {base_time / len(files):.4f}s")
+    print(f"Boosted  avg runtime: {boost_time / len(files):.4f}s")
+
+    print("\n--- POSE ACCURACY (lower is better) ---")
+    print(f"Baseline avg pose error: {base_pose / (base_count or 1):.4f}")
+    print(f"Boosted  avg pose error: {boost_pose / (boost_count or 1):.4f}")
+
+    print("\n--- DECISION MARGIN (higher is better) ---")
+    print(f"Baseline avg margin: {base_margins / (base_count or 1):.4f}")
+    print(f"Boosted  avg margin:  {boost_margins / (boost_count or 1):.4f}")
+
+    print("========================================================")
 
 
 if __name__ == "__main__":
