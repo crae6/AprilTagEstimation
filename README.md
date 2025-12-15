@@ -12,6 +12,7 @@ Dataset located in dataset folder, then pull all data from pi_cam folder. Contai
 
 ## Motion Blur
 Simply run ```python motion_blur/pipeline.py``` from main directory while dataset exists in file structure. 
+To run with motion blurred files only, change ```FILTER_PATTERN = ""``` to ```FILTER_PATTERN = "motion"``` within motion_blur/pipeline.py and rerun. 
 
 ## Dehazing
 
