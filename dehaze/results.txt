@@ -1,0 +1,31 @@
+Baseline method:
+    All images, detects 73
+    For just hazy, detects 33
+
+DCP:
+    Over all images:
+        Processed 128 images in 136.68 seconds
+        Baseline: 73
+        DCP: 55
+    
+    Over just hazy images:
+    processed 49 images in 32.96 seconds
+        Baseline: 27
+        DCP: 22
+
+
+SSR:
+    Over all images:
+        Processed 176 images in 517.77 seconds
+        Detected 103 of them
+    Over just hazy:
+        Processed 60 images in 132.96 seconds
+        33 detected
+
+MSR:
+    Over all images:
+        Processed 176 images in 1833.75 seconds
+        Detected 99
+
+MODEL:
+2844.88 seconds
