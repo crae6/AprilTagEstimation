@@ -11,6 +11,7 @@ pip install pupil-apriltags opencv-python numpy
 Dataset located in dataset folder, then pull all data from pi_cam folder. Contains all data for all conditions.
 
 ## Motion Blur
+Simply run ```python motion_blur/pipeline.py``` from main directory while dataset exists in file structure. 
 
 ## Dehazing
 
